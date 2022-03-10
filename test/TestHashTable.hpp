@@ -2,6 +2,9 @@
 #define __TESTHASHTABLE_HPP__
 
 #include <cstddef>
+#include <functional>
+#include <limits>
+#include <type_traits>
 
 namespace unit_test
 {
@@ -30,6 +33,12 @@ public:
 
 private:
     size_t i_size;
+};
+
+struct is_equal : public std::equal_to<int>
+{
+    using empty_type    = std::integral_constant<int, std::numeric_limits<int>::max()>;
+    using erased_type   = std::integral_constant<int, std::numeric_limits<int>::min()>;
 };
 
 }

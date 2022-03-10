@@ -8,11 +8,11 @@
 namespace specialized_datatypes
 {
 
-template < typename T, typename HashFunction, typename Predicate = std::equal_to<T>, typename EmptyT = T >
+template < typename T, typename HashFunction, typename Predicate>
 class open_addressing_hash_set
 {
     using container_type            = std::vector<T>;
-    using self_type                 = open_addressing_hash_set<T, HashFunction, Predicate, EmptyT>;
+    using self_type                 = open_addressing_hash_set<T, HashFunction, Predicate>;
 
     using container_iterator        = typename container_type::iterator;
     using const_container_iterator  = typename container_type::const_iterator;
@@ -39,13 +39,14 @@ public:
     };
 
     using value_type            = T;
-    using empty_type            = EmptyT;
     using pointer               = T *;
     using const_pointer         = T const *;
     using reference             = T &;
     using const_reference       = T const &;
     using hash_function_type    = HashFunction;
     using predicate_type        = Predicate;
+    using empty_type            = typename predicate_type::empty_type;
+    using erased_type           = typename predicate_type::erased_type;
 
     class const_iterator
     {
@@ -70,7 +71,7 @@ public:
         constexpr const_iterator & operator++ () noexcept
         {
             while   (   i_iterator < i_hash_table->i_container.end()
-                    &&  i_hash_table->predicate()(*(++i_iterator), s_empty_value)
+                    &&  i_hash_table->is_available_bucket(++i_iterator)
                     );
 
             return *this;
@@ -86,7 +87,7 @@ public:
         constexpr const_iterator & operator-- () noexcept
         {
             while   (   i_iterator >= i_hash_table->i_container.begin()
-                    &&  i_hash_table->predicate()(*(--i_iterator), s_empty_value)
+                    &&  i_hash_table->is_available_bucket(--i_iterator)
                     );
 
             if (i_iterator < i_hash_table->i_container.begin())
@@ -150,7 +151,7 @@ public:
 
         auto result = false;
 
-        if (predicate()(*it, s_empty_value))
+        if (is_available_bucket(it))
         {
             *it = std::move(value);
             ++i_occupancy;
@@ -172,11 +173,29 @@ public:
         auto it = find_position(value);
         size_t result = 0;
 
-        if (!predicate()(*it, s_empty_value))
+        if (it != i_container.end() && !is_available_bucket(it))
         {
-            *it = s_empty_value;
+            *it     = std::move(s_erased_value);
+            result  = 1;
             --i_occupancy;
-            result = 1;
+        }
+
+        auto const first        = i_container.begin();
+        auto erased_position    = std::distance(first, it);
+        auto const count_limit  = i_container.size();
+        auto step               = 1;
+        auto it_following       = first + (erased_position + 1) % count_limit; 
+        while   (   result
+                &&  step < count_limit
+                &&  predicate()(*it, s_erased_value)
+                &&  predicate()(*it_following, s_empty_value)
+                )
+        {
+            *it = std::move(s_empty_value);
+            --erased_position;
+            ++step;
+            it  = first + erased_position % count_limit;
+            it  = first + (erased_position + 1) % count_limit;
         }
 
         return result;
@@ -208,10 +227,11 @@ public:
 
         container_type original (reserve_count, s_empty_value);
         std::swap(i_container, original);
-
+        i_occupancy = 0;
+        
         for (auto & value : original)
         {
-            if (!predicate()(value, s_empty_value))
+            if (!is_available_bucket_value(value))
             {
                 emplace(std::move(value));
                 value = s_empty_value;
@@ -224,7 +244,7 @@ public:
     {
         auto it = find_position(value);
 
-        if (it != i_container.end() && predicate()(*it, s_empty_value))
+        if (it != i_container.end() && is_available_bucket(it))
         {
             it = i_container.end();
         }
@@ -272,7 +292,7 @@ public:
     constexpr const_iterator begin              () const noexcept
     {
         const_iterator it(this, i_container.begin());
-        if (!i_container.empty() && predicate()(s_empty_value, *it)) ++it;
+        if (!i_container.empty() && is_available_bucket(it.i_iterator)) ++it;
 
         return it;
     }
@@ -329,13 +349,26 @@ private:
         return container_iterator(std::next(i_container.begin(), std::distance(i_container.cbegin(), it)));
     }
 
+    [[nodiscard]]
+    constexpr bool is_available_bucket                  (const_container_iterator it) const noexcept
+    {
+        return predicate()(*it, s_empty_value) || predicate()(*it, s_erased_value);
+    }
+
+    [[nodiscard]]
+    constexpr bool is_available_bucket_value            (value_type value) const noexcept
+    {
+        return predicate()(value, s_empty_value) || predicate()(value, s_erased_value);
+    }
+
     container_type      i_container;
     hash_function_type  i_hash_function;
     predicate_type      i_predicate;
 
     size_t              i_occupancy;
 
-    constexpr static empty_type s_empty_value {};
+    constexpr static empty_type     s_empty_value {};
+    constexpr static erased_type    s_erased_value {};
 };
 
 }
